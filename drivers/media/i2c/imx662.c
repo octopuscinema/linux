@@ -1253,7 +1253,7 @@ free_err:
 	return ret;
 }
 
-static int imx662_remove(struct i2c_client *client)
+static void imx662_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct imx662 *imx662 = to_imx662(sd);
@@ -1268,8 +1268,6 @@ static int imx662_remove(struct i2c_client *client)
 	if (!pm_runtime_status_suspended(imx662->dev))
 		imx662_power_off(imx662->dev);
 	pm_runtime_set_suspended(imx662->dev);
-
-	return 0;
 }
 
 MODULE_DEVICE_TABLE(of, imx662_of_match);

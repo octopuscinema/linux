@@ -1,4 +1,4 @@
-name: Pi kernel build tests
+name: Raspberry Pi kernel CI
 
 on:
   pull_request:

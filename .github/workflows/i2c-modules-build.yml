@@ -84,7 +84,7 @@ jobs:
         fi
         make O=${{github.workspace}}/build ${{matrix.defconfig}}
         scripts/config --file ${{github.workspace}}/build/.config --set-val CONFIG_WERROR y
-        make O=${{github.workspace}}/build M=${{github.workspace}}/drivers/media/i2c -j ${{env.NUM_JOBS}} $IMAGE modules dtbs
+        make O=${{github.workspace}}/build -j ${{env.NUM_JOBS}} $IMAGE modules dtbs
         mkdir -p ${{github.workspace}}/install/boot/overlays
         make O=${{github.workspace}}/build INSTALL_MOD_PATH=${{github.workspace}}/install modules_install
         cp ${{github.workspace}}/build/arch/${ARCH}/boot/dts/${DTS_SUBDIR}/*.dtb ${{github.workspace}}/install/boot/

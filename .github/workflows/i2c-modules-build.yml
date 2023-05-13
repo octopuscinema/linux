@@ -1,14 +1,14 @@
-name: Raspberry Pi 4 Kernel
+name: Raspberry Pi 4 kernel CI
 
 on:
   pull_request:
     paths-ignore:
       - '.github/**'
     branches: [ "rpi-*" ]
-#  push:
-#    paths-ignore:
-#      - '.github/**'
-#    branches: [ "rpi-*" ]
+  push:
+    paths-ignore:
+      - '.github/**'
+    branches: [ "rpi-*" ]
   workflow_dispatch:
 
 env:
@@ -20,31 +20,6 @@ jobs:
     strategy:
       matrix:
         include:
-#          - name: bcm2835
-#            arch: arm
-#            defconfig: bcm2835_defconfig
-#            kernel: kernel
-
-#          - name: arm64
-#            arch: arm64
-#            defconfig: defconfig
-#            kernel: kernel8
-
-#          - name: bcmrpi
-#            arch: arm
-#            defconfig: bcmrpi_defconfig
-#            kernel: kernel
-
-#          - name: bcm2709
-#            arch: arm
-#            defconfig: bcm2709_defconfig
-#            kernel: kernel7
-
-#          - name: bcm2711
-#            arch: arm
-#            defconfig: bcm2711_defconfig
-#            kernel: kernel7l
-
           - name: bcm2711_arm64
             arch: arm64
             defconfig: bcm2711_defconfig

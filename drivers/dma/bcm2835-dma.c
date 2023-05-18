@@ -158,7 +158,8 @@ struct bcm2835_desc {
 #define BCM2835_DMA_S_WIDTH	BIT(9) /* 128bit writes if set */
 #define BCM2835_DMA_S_DREQ	BIT(10) /* enable SREQ for source */
 #define BCM2835_DMA_S_IGNORE	BIT(11) /* ignore source reads - read 0 */
-#define BCM2835_DMA_BURST_LENGTH(x) ((x & 15) << 12)
+#define BCM2835_DMA_BURST_LENGTH(x) (((x) & 15) << 12)
+#define BCM2835_DMA_GET_BURST_LENGTH(x) (((x) >> 12) & 15)
 #define BCM2835_DMA_CS_FLAGS(x) (x & (BCM2835_DMA_PRIORITY(15) | \
 				      BCM2835_DMA_PANIC_PRIORITY(15) | \
 				      BCM2835_DMA_WAIT_FOR_WRITES | \
@@ -181,6 +182,11 @@ struct bcm2835_desc {
 #define BCM2835_DMA_WIDE_DEST BIT(25)
 #define WIDE_DEST(x) ((x & BCM2835_DMA_WIDE_DEST) ? \
 		      BCM2835_DMA_D_WIDTH : 0)
+
+/* A fake bit to request that the driver requires multi-beat burst */
+#define BCM2835_DMA_BURST BIT(30)
+#define BURST_LENGTH(x) ((x & BCM2835_DMA_BURST) ? \
+		      BCM2835_DMA_BURST_LENGTH(3) : 0)
 
 
 /* debug register bits */
@@ -243,6 +249,9 @@ struct bcm2835_desc {
 #define BCM2711_DMA40_DISDEBUG		BIT(29)
 #define BCM2711_DMA40_ABORT		BIT(30)
 #define BCM2711_DMA40_HALT		BIT(31)
+// we always want to run in supervisor mode
+#define BCM2711_DMA40_PROT		(BIT(8)|BIT(9))
+
 #define BCM2711_DMA40_CS_FLAGS(x) (x & (BCM2711_DMA40_QOS(15) | \
 					BCM2711_DMA40_PANIC_QOS(15) | \
 					BCM2711_DMA40_WAIT_FOR_WRITES |	\
@@ -285,7 +294,7 @@ struct bcm2835_desc {
 /* the max dma length for different channels */
 #define MAX_DMA40_LEN SZ_1G
 
-#define BCM2711_DMA40_BURST_LEN(x)	((min(x,16) - 1) << 8)
+#define BCM2711_DMA40_BURST_LEN(x)	(((x) & 15) << 8)
 #define BCM2711_DMA40_INC		BIT(12)
 #define BCM2711_DMA40_SIZE_32		(0 << 13)
 #define BCM2711_DMA40_SIZE_64		(1 << 13)
@@ -362,12 +371,16 @@ static inline uint32_t to_bcm2711_ti(uint32_t info)
 
 static inline uint32_t to_bcm2711_srci(uint32_t info)
 {
-	return ((info & BCM2835_DMA_S_INC) ? BCM2711_DMA40_INC : 0);
+	return ((info & BCM2835_DMA_S_INC) ? BCM2711_DMA40_INC : 0) |
+	       ((info & BCM2835_DMA_S_WIDTH) ? BCM2711_DMA40_SIZE_128 : 0) |
+	       BCM2711_DMA40_BURST_LEN(BCM2835_DMA_GET_BURST_LENGTH(info));
 }
 
 static inline uint32_t to_bcm2711_dsti(uint32_t info)
 {
-	return ((info & BCM2835_DMA_D_INC) ? BCM2711_DMA40_INC : 0);
+	return ((info & BCM2835_DMA_D_INC) ? BCM2711_DMA40_INC : 0) |
+	       ((info & BCM2835_DMA_D_WIDTH) ? BCM2711_DMA40_SIZE_128 : 0) |
+	       BCM2711_DMA40_BURST_LEN(BCM2835_DMA_GET_BURST_LENGTH(info));
 }
 
 static inline uint32_t to_bcm2711_cbaddr(dma_addr_t addr)
@@ -543,7 +556,10 @@ static struct bcm2835_desc *bcm2835_dma_create_cb_chain(
 				cyclic ? finalextrainfo : 0);
 
 			/* calculate new remaining length */
-			len -= control_block->length;
+			if (c->is_40bit_channel)
+				len -= ((struct bcm2711_dma40_scb *)control_block)->len;
+			else
+				len -= control_block->length;
 		}
 
 		/* link this the last controlblock */
@@ -555,10 +571,19 @@ static struct bcm2835_desc *bcm2835_dma_create_cb_chain(
 			d->cb_list[frame - 1].cb->next = cb_entry->paddr;
 
 		/* update src and dst and length */
-		if (src && (info & BCM2835_DMA_S_INC))
-			src += control_block->length;
-		if (dst && (info & BCM2835_DMA_D_INC))
-			dst += control_block->length;
+		if (src && (info & BCM2835_DMA_S_INC)) {
+			if (c->is_40bit_channel)
+				src += ((struct bcm2711_dma40_scb *)control_block)->len;
+			else
+				src += control_block->length;
+		}
+
+		if (dst && (info & BCM2835_DMA_D_INC)) {
+			if (c->is_40bit_channel)
+				dst += ((struct bcm2711_dma40_scb *)control_block)->len;
+			else
+				dst += control_block->length;
+		}
 
 		/* Length of total transfer */
 		if (c->is_40bit_channel)
@@ -639,10 +664,6 @@ static void bcm2835_dma_abort(struct bcm2835_chan *c)
 {
 	void __iomem *chan_base = c->chan_base;
 	long int timeout = 10000;
-	u32 wait_mask = BCM2835_DMA_WAITING_FOR_WRITES;
-
-	if (c->is_40bit_channel)
-		wait_mask = BCM2711_DMA40_WAITING_FOR_WRITES;
 
 	/*
 	 * A zero control block address means the channel is idle.
@@ -651,19 +672,60 @@ static void bcm2835_dma_abort(struct bcm2835_chan *c)
 	if (!readl(chan_base + BCM2835_DMA_ADDR))
 		return;
 
-	/* Write 0 to the active bit - Pause the DMA */
-	writel(0, chan_base + BCM2835_DMA_CS);
+	if (c->is_40bit_channel) {
+		/* Halt the current DMA */
+		writel(readl(chan_base + BCM2711_DMA40_CS) | BCM2711_DMA40_HALT,
+			     chan_base + BCM2711_DMA40_CS);
 
-	/* Wait for any current AXI transfer to complete */
-	while ((readl(chan_base + BCM2835_DMA_CS) & wait_mask) && --timeout)
-		cpu_relax();
+		while ((readl(chan_base + BCM2711_DMA40_CS) & BCM2711_DMA40_HALT) && --timeout)
+			cpu_relax();
 
-	/* Peripheral might be stuck and fail to signal AXI write responses */
-	if (!timeout)
-		dev_err(c->vc.chan.device->dev,
-			"failed to complete outstanding writes\n");
+		/* Peripheral might be stuck and fail to halt */
+		if (!timeout)
+			dev_err(c->vc.chan.device->dev,
+				"failed to halt dma\n");
 
-	writel(BCM2835_DMA_RESET, chan_base + BCM2835_DMA_CS);
+		writel(BCM2711_DMA40_PROT, chan_base + BCM2711_DMA40_CS);
+		writel(0, chan_base + BCM2711_DMA40_CB);
+	} else {
+		/*
+		 * A zero control block address means the channel is idle.
+		 * (The ACTIVE flag in the CS register is not a reliable indicator.)
+		 */
+		if (!readl(chan_base + BCM2835_DMA_ADDR))
+			return;
+
+		/* Write 0 to the active bit - Pause the DMA */
+		writel(readl(chan_base + BCM2835_DMA_CS) & ~BCM2835_DMA_ACTIVE,
+		       chan_base + BCM2835_DMA_CS);
+
+		/* wait for DMA to be paused */
+		while ((readl(chan_base + BCM2835_DMA_CS) & BCM2835_DMA_WAITING_FOR_WRITES)
+		       && --timeout)
+			cpu_relax();
+
+		/* Peripheral might be stuck and fail to signal AXI write responses */
+		if (!timeout)
+			dev_err(c->vc.chan.device->dev,
+				"failed to pause dma\n");
+
+		/* We need to clear the next DMA block pending */
+		writel(0, chan_base + BCM2835_DMA_NEXTCB);
+
+		/* Abort the DMA, which needs to be enabled to complete */
+		writel(readl(chan_base + BCM2835_DMA_CS) | BCM2835_DMA_ABORT | BCM2835_DMA_ACTIVE,
+		chan_base + BCM2835_DMA_CS);
+
+		/* wait for DMA to have been aborted */
+		timeout = 10000;
+		while ((readl(chan_base + BCM2835_DMA_CS) & BCM2835_DMA_ABORT) && --timeout)
+			cpu_relax();
+
+		/* Peripheral might be stuck and fail to signal AXI write responses */
+		if (!timeout)
+			dev_err(c->vc.chan.device->dev,
+				"failed to abort dma\n");
+	}
 }
 
 static void bcm2835_dma_start_desc(struct bcm2835_chan *c)
@@ -683,7 +745,7 @@ static void bcm2835_dma_start_desc(struct bcm2835_chan *c)
 	if (c->is_40bit_channel) {
 		writel(to_bcm2711_cbaddr(d->cb_list[0].paddr),
 		       c->chan_base + BCM2711_DMA40_CB);
-		writel(BCM2711_DMA40_ACTIVE | BCM2711_DMA40_CS_FLAGS(c->dreq),
+		writel(BCM2711_DMA40_ACTIVE | BCM2711_DMA40_PROT | BCM2711_DMA40_CS_FLAGS(c->dreq),
 		       c->chan_base + BCM2711_DMA40_CS);
 	} else {
 		writel(d->cb_list[0].paddr, c->chan_base + BCM2835_DMA_ADDR);
@@ -716,8 +778,13 @@ static irqreturn_t bcm2835_dma_callback(int irq, void *data)
 	 * if this IRQ handler is threaded.) If the channel is finished, it
 	 * will remain idle despite the ACTIVE flag being set.
 	 */
-	writel(BCM2835_DMA_INT | BCM2835_DMA_ACTIVE | BCM2835_DMA_CS_FLAGS(c->dreq),
-	       c->chan_base + BCM2835_DMA_CS);
+	if (c->is_40bit_channel)
+		writel(BCM2835_DMA_INT | BCM2711_DMA40_ACTIVE | BCM2711_DMA40_PROT |
+		       BCM2711_DMA40_CS_FLAGS(c->dreq),
+		       c->chan_base + BCM2711_DMA40_CS);
+	else
+		writel(BCM2835_DMA_INT | BCM2835_DMA_ACTIVE | BCM2835_DMA_CS_FLAGS(c->dreq),
+		       c->chan_base + BCM2835_DMA_CS);
 
 	d = c->desc;
 
@@ -779,20 +846,39 @@ static size_t bcm2835_dma_desc_size_pos(struct bcm2835_desc *d, dma_addr_t addr)
 	unsigned int i;
 	size_t size;
 
-	for (size = i = 0; i < d->frames; i++) {
-		struct bcm2835_dma_cb *control_block = d->cb_list[i].cb;
-		size_t this_size = control_block->length;
-		dma_addr_t dma;
+	if (d->c->is_40bit_channel) {
+		for (size = i = 0; i < d->frames; i++) {
+			struct bcm2711_dma40_scb *control_block =
+				(struct bcm2711_dma40_scb *)d->cb_list[i].cb;
+			size_t this_size = control_block->len;
+			dma_addr_t dma;
 
-		if (d->dir == DMA_DEV_TO_MEM)
-			dma = control_block->dst;
-		else
-			dma = control_block->src;
+			if (d->dir == DMA_DEV_TO_MEM)
+				dma = control_block->dst;
+			else
+				dma = control_block->src;
 
-		if (size)
-			size += this_size;
-		else if (addr >= dma && addr < dma + this_size)
-			size += dma + this_size - addr;
+			if (size)
+				size += this_size;
+			else if (addr >= dma && addr < dma + this_size)
+				size += dma + this_size - addr;
+		}
+	} else {
+		for (size = i = 0; i < d->frames; i++) {
+			struct bcm2835_dma_cb *control_block = d->cb_list[i].cb;
+			size_t this_size = control_block->length;
+			dma_addr_t dma;
+
+			if (d->dir == DMA_DEV_TO_MEM)
+				dma = control_block->dst;
+			else
+				dma = control_block->src;
+
+			if (size)
+				size += this_size;
+			else if (addr >= dma && addr < dma + this_size)
+				size += dma + this_size - addr;
+		}
 	}
 
 	return size;
@@ -819,20 +905,25 @@ static enum dma_status bcm2835_dma_tx_status(struct dma_chan *chan,
 		struct bcm2835_desc *d = c->desc;
 		dma_addr_t pos;
 
-		if (d->dir == DMA_MEM_TO_DEV && c->is_40bit_channel)
-			pos = readl(c->chan_base + BCM2711_DMA40_SRC) +
-				((readl(c->chan_base + BCM2711_DMA40_SRCI) &
-				  0xff) << 8);
-		else if (d->dir == DMA_MEM_TO_DEV && !c->is_40bit_channel)
+		if (d->dir == DMA_MEM_TO_DEV && c->is_40bit_channel) {
+			u64 lo_bits, hi_bits;
+
+			lo_bits = readl(c->chan_base + BCM2711_DMA40_SRC);
+			hi_bits = readl(c->chan_base + BCM2711_DMA40_SRCI) & 0xff;
+			pos = (hi_bits << 32) | lo_bits;
+		} else if (d->dir == DMA_MEM_TO_DEV && !c->is_40bit_channel) {
 			pos = readl(c->chan_base + BCM2835_DMA_SOURCE_AD);
-		else if (d->dir == DMA_DEV_TO_MEM && c->is_40bit_channel)
-			pos = readl(c->chan_base + BCM2711_DMA40_DEST) +
-				((readl(c->chan_base + BCM2711_DMA40_DESTI) &
-				  0xff) << 8);
-		else if (d->dir == DMA_DEV_TO_MEM && !c->is_40bit_channel)
+		} else if (d->dir == DMA_DEV_TO_MEM && c->is_40bit_channel) {
+			u64 lo_bits, hi_bits;
+
+			lo_bits = readl(c->chan_base + BCM2711_DMA40_DEST);
+			hi_bits = readl(c->chan_base + BCM2711_DMA40_DESTI) & 0xff;
+			pos = (hi_bits << 32) | lo_bits;
+		} else if (d->dir == DMA_DEV_TO_MEM && !c->is_40bit_channel) {
 			pos = readl(c->chan_base + BCM2835_DMA_DEST_AD);
-		else
+		} else {
 			pos = 0;
+		}
 
 		txstate->residue = bcm2835_dma_desc_size_pos(d, pos);
 	} else {
@@ -863,8 +954,9 @@ static struct dma_async_tx_descriptor *bcm2835_dma_prep_dma_memcpy(
 	struct bcm2835_chan *c = to_bcm2835_dma_chan(chan);
 	struct bcm2835_desc *d;
 	u32 info = BCM2835_DMA_D_INC | BCM2835_DMA_S_INC |
-		   WIDE_SOURCE(c->dreq) | WIDE_DEST(c->dreq);
-	u32 extra = BCM2835_DMA_INT_EN | WAIT_RESP(c->dreq);
+		   WAIT_RESP(c->dreq) | WIDE_SOURCE(c->dreq) |
+		   WIDE_DEST(c->dreq) | BURST_LENGTH(c->dreq);
+	u32 extra = BCM2835_DMA_INT_EN;
 	size_t max_len = bcm2835_dma_max_frame_length(c);
 	size_t frames;
 
@@ -894,8 +986,8 @@ static struct dma_async_tx_descriptor *bcm2835_dma_prep_slave_sg(
 	struct bcm2835_chan *c = to_bcm2835_dma_chan(chan);
 	struct bcm2835_desc *d;
 	dma_addr_t src = 0, dst = 0;
-	u32 info = WAIT_RESP(c->dreq) |
-		   WIDE_SOURCE(c->dreq) | WIDE_DEST(c->dreq);
+	u32 info = WAIT_RESP(c->dreq) | WIDE_SOURCE(c->dreq) |
+		   WIDE_DEST(c->dreq) | BURST_LENGTH(c->dreq);
 	u32 extra = BCM2835_DMA_INT_EN;
 	size_t frames;
 
@@ -947,7 +1039,8 @@ static struct dma_async_tx_descriptor *bcm2835_dma_prep_dma_cyclic(
 	struct bcm2835_chan *c = to_bcm2835_dma_chan(chan);
 	struct bcm2835_desc *d;
 	dma_addr_t src, dst;
-	u32 info = WAIT_RESP(c->dreq) | WIDE_SOURCE(c->dreq) | WIDE_DEST(c->dreq);
+	u32 info = WAIT_RESP(c->dreq) | WIDE_SOURCE(c->dreq) |
+		   WIDE_DEST(c->dreq) | BURST_LENGTH(c->dreq);
 	u32 extra = 0;
 	size_t max_len = bcm2835_dma_max_frame_length(c);
 	size_t frames;
@@ -1144,15 +1237,15 @@ void bcm2711_dma40_memcpy(dma_addr_t dst, dma_addr_t src, size_t size)
 	scb->len = size;
 	scb->next_cb = 0;
 
-	writel((u32)(memcpy_scb_dma >> 5), memcpy_chan + BCM2711_DMA40_CB);
-	writel(BCM2711_DMA40_MEMCPY_FLAGS + BCM2711_DMA40_ACTIVE,
+	writel(to_bcm2711_cbaddr(memcpy_scb_dma), memcpy_chan + BCM2711_DMA40_CB);
+	writel(BCM2711_DMA40_MEMCPY_FLAGS | BCM2711_DMA40_ACTIVE | BCM2711_DMA40_PROT,
 	       memcpy_chan + BCM2711_DMA40_CS);
 
 	/* Poll for completion */
 	while (!(readl(memcpy_chan + BCM2711_DMA40_CS) & BCM2711_DMA40_END))
 		cpu_relax();
 
-	writel(BCM2711_DMA40_END, memcpy_chan + BCM2711_DMA40_CS);
+	writel(BCM2711_DMA40_END | BCM2711_DMA40_PROT, memcpy_chan + BCM2711_DMA40_CS);
 
 	spin_unlock_irqrestore(&memcpy_lock, flags);
 }

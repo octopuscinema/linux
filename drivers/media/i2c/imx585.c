@@ -772,12 +772,13 @@ static int imx585_set_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_EXPOSURE:
 		{
-		dev_info(&client->dev,"V4L2_CID_EXPOSURE : %d\n",ctrl->val);
-		dev_info(&client->dev,"\tvblank:%d, hblank:%d\n",imx585->vblank->val, imx585->hblank->val);
-		dev_info(&client->dev,"\tVMAX:%d, HMAX:%d\n",imx585->VMAX, imx585->HMAX);
-		u64 shr = calculate_shr(ctrl->val, imx585->HMAX, imx585->VMAX, 0, 209);
-		dev_info(&client->dev,"\tSHR:%lld\n",shr);
-		ret = imx585_write_reg_2byte(imx585, IMX585_REG_SHR, shr);
+			u64 shr;
+			dev_info(&client->dev,"V4L2_CID_EXPOSURE : %d\n",ctrl->val);
+			dev_info(&client->dev,"\tvblank:%d, hblank:%d\n",imx585->vblank->val, imx585->hblank->val);
+			dev_info(&client->dev,"\tVMAX:%d, HMAX:%d\n",imx585->VMAX, imx585->HMAX);
+			shr = calculate_shr(ctrl->val, imx585->HMAX, imx585->VMAX, 0, 209);
+			dev_info(&client->dev,"\tSHR:%lld\n",shr);
+			ret = imx585_write_reg_2byte(imx585, IMX585_REG_SHR, shr);
 		}
 		break;
 	case V4L2_CID_ANALOGUE_GAIN:
@@ -794,15 +795,17 @@ static int imx585_set_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_HBLANK:
 		{
-		dev_info(&client->dev,"V4L2_CID_HBLANK : %d\n",ctrl->val);
-		//int hmax = (IMX585_NATIVE_WIDTH + ctrl->val) * 72000000; / IMX585_PIXEL_RATE;
-		u64 pixel_rate = (u64)mode->width * 74500000;
-		do_div(pixel_rate,mode->min_HMAX);
-		u64 hmax = (u64)(mode->width + ctrl->val) * 74500000;
-		do_div(hmax,pixel_rate);
-		imx585 -> HMAX = hmax;
-		dev_info(&client->dev,"\tHMAX : %d\n",imx585 -> HMAX);
-		ret = imx585_write_reg_2byte(imx585, IMX585_REG_HMAX, hmax);
+			u64 pixel_rate;
+			u64 hmax;
+			dev_info(&client->dev,"V4L2_CID_HBLANK : %d\n",ctrl->val);
+			//int hmax = (IMX585_NATIVE_WIDTH + ctrl->val) * 72000000; / IMX585_PIXEL_RATE;
+			pixel_rate = (u64)mode->width * 74500000;
+			do_div(pixel_rate,mode->min_HMAX);
+			hmax = (u64)(mode->width + ctrl->val) * 74500000;
+			do_div(hmax,pixel_rate);
+			imx585 -> HMAX = hmax;
+			dev_info(&client->dev,"\tHMAX : %d\n",imx585 -> HMAX);
+			ret = imx585_write_reg_2byte(imx585, IMX585_REG_HMAX, hmax);
 		}
 		break;
 	case V4L2_CID_VFLIP:

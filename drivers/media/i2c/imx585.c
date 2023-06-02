@@ -51,7 +51,7 @@
 /* Analog gain control */
 #define IMX585_REG_ANALOG_GAIN		0x306C
 #define IMX585_ANA_GAIN_MIN		0
-#define IMX585_ANA_GAIN_MAX		1
+#define IMX585_ANA_GAIN_MAX		240
 #define IMX585_ANA_GAIN_STEP		1
 #define IMX585_ANA_GAIN_DEFAULT		0x0
 
@@ -781,10 +781,15 @@ static int imx585_set_ctrl(struct v4l2_ctrl *ctrl)
 			ret = imx585_write_reg_2byte(imx585, IMX585_REG_SHR, shr);
 		}
 		break;
-	case V4L2_CID_ANALOGUE_GAIN:
+        case V4L2_CID_ANALOGUE_GAIN:
+		dev_info(&client->dev,"V4L2_CID_ANALOGUE_GAIN : %d\n",ctrl->val);
+                ret = imx585_write_reg_2byte(imx585, IMX585_REG_ANALOG_GAIN, ctrl->val);
+                break;
+
+	/* case V4L2_CID_ANALOGUE_GAIN:
 		dev_info(&client->dev,"V4L2_CID_ANALOGUE_GAIN : %d\n",ctrl->val);
 		ret = imx585_write_reg_2byte(imx585, IMX585_REG_ANALOG_GAIN, ctrl->val);
-		break;
+		break; */
 	case V4L2_CID_VBLANK:
 		{
 		dev_info(&client->dev,"V4L2_CID_VBLANK : %d\n",ctrl->val);
@@ -1382,7 +1387,10 @@ static int imx585_init_controls(struct imx585 *imx585)
 					     IMX585_EXPOSURE_MAX,
 					     IMX585_EXPOSURE_STEP,
 					     IMX585_EXPOSURE_DEFAULT);
-
+/*
+	v4l2_ctrl_new_std(&imx585->ctrls, &imx585_ctrl_ops,
+                          V4L2_CID_ANALOGUE_GAIN, 0, 240, 1, 0);
+*/
 	v4l2_ctrl_new_std(ctrl_hdlr, &imx585_ctrl_ops, V4L2_CID_ANALOGUE_GAIN,
 			  IMX585_ANA_GAIN_MIN, IMX585_ANA_GAIN_MAX,
 			  IMX585_ANA_GAIN_STEP, IMX585_ANA_GAIN_DEFAULT);

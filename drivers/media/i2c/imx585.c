@@ -777,12 +777,13 @@ static int imx585_set_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_EXPOSURE:
 		{
-		dev_info(&client->dev,"V4L2_CID_EXPOSURE : %d\n",ctrl->val);
-		dev_info(&client->dev,"\tvblank:%d, hblank:%d\n",imx585->vblank->val, imx585->hblank->val);
-		dev_info(&client->dev,"\tVMAX:%d, HMAX:%d\n",imx585->VMAX, imx585->HMAX);
-		u64 shr = calculate_shr(ctrl->val, imx585->HMAX, imx585->VMAX, 0, 209);
-		dev_info(&client->dev,"\tSHR:%lld\n",shr);
-		ret = imx585_write_reg_2byte(imx585, IMX585_REG_SHR, shr);
+			u64 shr;
+			dev_info(&client->dev,"V4L2_CID_EXPOSURE : %d\n",ctrl->val);
+			dev_info(&client->dev,"\tvblank:%d, hblank:%d\n",imx585->vblank->val, imx585->hblank->val);
+			dev_info(&client->dev,"\tVMAX:%d, HMAX:%d\n",imx585->VMAX, imx585->HMAX);
+			shr = calculate_shr(ctrl->val, imx585->HMAX, imx585->VMAX, 0, 209);
+			dev_info(&client->dev,"\tSHR:%lld\n",shr);
+			ret = imx585_write_reg_2byte(imx585, IMX585_REG_SHR, shr);
 		}
 		break;
         case V4L2_CID_ANALOGUE_GAIN:

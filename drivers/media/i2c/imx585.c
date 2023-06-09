@@ -4,6 +4,8 @@
  *
  * Based on Sony imx477 camera driver
  * Copyright (C) 2019-2020 Raspberry Pi (Trading) Ltd
+ * Modified by Will WHANG
+ * Modified by sohonomura2020 in Soho Enterprise Ltd.
  */
 #include <asm/unaligned.h>
 #include <linux/clk.h>
@@ -50,12 +52,15 @@
 
 /* Analog gain control */
 #define IMX585_REG_ANALOG_GAIN		0x306C
-#define IMX585_ANA_GAIN_MIN		0
-#define IMX585_ANA_GAIN_MAX		240
+#define IMX585_ANA_GAIN_MIN		1
+#define IMX585_ANA_GAIN_MAX		240 // x3980= 72db = 0.3db x 240
 #define IMX585_ANA_GAIN_STEP		1
-#define IMX585_ANA_GAIN_DEFAULT		0x0
+#define IMX585_ANA_GAIN_DEFAULT		1
 
-#define IMX585_REG_VFLIP		0x3021
+// #define IMX585_REG_VFLIP		0x3021
+#define IMX585_FLIP_WINMODEH    0x3020
+#define IMX585_FLIP_WINMODEV    0x3021
+
 
 /* Embedded metadata stream structure */
 #define IMX585_EMBEDDED_LINE_WIDTH 16384
@@ -153,7 +158,7 @@ static const struct imx585_reg mode_common_regs[] = {
     {0x3015, 0x03},// DATARATE_SEL [3:0]  1440 Mbps
     // {0x302C, 0x4C},// HMAX [15:0]
     // {0x302D, 0x04},// 
-    {0x3030, 0x01},// FDG_SEL0 HCG
+    {0x3030, 0x00},// FDG_SEL0 LCG, HCG:0x01
     {0x3040, 0x01},// LANEMODE [2:0] 2 lane
     {0x3023, 0x01},// RAW12
     // {0x3028, 0x94},// VMAX
@@ -772,13 +777,12 @@ static int imx585_set_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_EXPOSURE:
 		{
-			u64 shr;
-			dev_info(&client->dev,"V4L2_CID_EXPOSURE : %d\n",ctrl->val);
-			dev_info(&client->dev,"\tvblank:%d, hblank:%d\n",imx585->vblank->val, imx585->hblank->val);
-			dev_info(&client->dev,"\tVMAX:%d, HMAX:%d\n",imx585->VMAX, imx585->HMAX);
-			shr = calculate_shr(ctrl->val, imx585->HMAX, imx585->VMAX, 0, 209);
-			dev_info(&client->dev,"\tSHR:%lld\n",shr);
-			ret = imx585_write_reg_2byte(imx585, IMX585_REG_SHR, shr);
+		dev_info(&client->dev,"V4L2_CID_EXPOSURE : %d\n",ctrl->val);
+		dev_info(&client->dev,"\tvblank:%d, hblank:%d\n",imx585->vblank->val, imx585->hblank->val);
+		dev_info(&client->dev,"\tVMAX:%d, HMAX:%d\n",imx585->VMAX, imx585->HMAX);
+		u64 shr = calculate_shr(ctrl->val, imx585->HMAX, imx585->VMAX, 0, 209);
+		dev_info(&client->dev,"\tSHR:%lld\n",shr);
+		ret = imx585_write_reg_2byte(imx585, IMX585_REG_SHR, shr);
 		}
 		break;
         case V4L2_CID_ANALOGUE_GAIN:
@@ -813,10 +817,20 @@ static int imx585_set_ctrl(struct v4l2_ctrl *ctrl)
 			ret = imx585_write_reg_2byte(imx585, IMX585_REG_HMAX, hmax);
 		}
 		break;
+/* port from my own driver sohonomura2020 */
+        case V4L2_CID_HFLIP:
+                ret = imx585_write_reg_1byte(imx585, IMX585_FLIP_WINMODEH, ctrl->val);
+                break;
+        case V4L2_CID_VFLIP:
+                ret = imx585_write_reg_1byte(imx585, IMX585_FLIP_WINMODEV, ctrl->val);
+                break;
+
+/*
 	case V4L2_CID_VFLIP:
 		dev_info(&client->dev,"V4L2_CID_VFLIP : %d\n",imx585->vflip->val);
 		ret = imx585_write_reg_1byte(imx585, IMX585_REG_VFLIP, imx585->vflip->val);
 		break;
+*/
 	default:
 		dev_info(&client->dev,
 			 "ctrl(id:0x%x,val:0x%x) is not handled\n",
@@ -1396,10 +1410,17 @@ static int imx585_init_controls(struct imx585 *imx585)
 			  IMX585_ANA_GAIN_STEP, IMX585_ANA_GAIN_DEFAULT);
 
 
+        imx585->hflip = v4l2_ctrl_new_std(ctrl_hdlr, &imx585_ctrl_ops,
+                                          V4L2_CID_HFLIP, 0, 1, 1, 0);
+        imx585->vflip = v4l2_ctrl_new_std(ctrl_hdlr, &imx585_ctrl_ops,
+                                          V4L2_CID_VFLIP, 0, 1, 1, 0);
+
+/*
 	imx585->vflip = v4l2_ctrl_new_std(ctrl_hdlr, &imx585_ctrl_ops,
 					  V4L2_CID_VFLIP, 0, 1, 1, 0);
 	if (imx585->vflip)
 		imx585->vflip->flags |= V4L2_CTRL_FLAG_MODIFY_LAYOUT;
+*/
 
 	if (ctrl_hdlr->error) {
 		ret = ctrl_hdlr->error;
@@ -1593,5 +1614,6 @@ static struct i2c_driver imx585_i2c_driver = {
 module_i2c_driver(imx585_i2c_driver);
 
 MODULE_AUTHOR("Will Whang <will@willwhang.com>");
+MODULE_AUTHOR("Tetsuya NOMURA <tetsuya.nomura@soho-enterprise.com>");
 MODULE_DESCRIPTION("Sony imx585 sensor driver");
 MODULE_LICENSE("GPL v2");

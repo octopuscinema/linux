@@ -1023,6 +1023,17 @@ config VIDEO_UDA1342
 	  To compile this driver as a module, choose M here: the
 	  module will be called uda1342.
 
+config VIDEO_IMX585
+	tristate "Sony IMX585 sensor support"
+	depends on I2C && VIDEO_DEV
+	select VIDEO_V4L2_SUBDEV_API
+	help
+	  This is a Video4Linux2 sensor driver for the Sony
+	  IMX585 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called IMX585.
+
 config VIDEO_IMX662
 	tristate "Sony IMX662 sensor support"
 	depends on I2C && VIDEO_DEV

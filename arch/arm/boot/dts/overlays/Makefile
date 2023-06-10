@@ -119,6 +119,8 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	imx462.dtbo \
 	imx477.dtbo \
 	imx519.dtbo \
+	imx585.dtbo \
+	imx662.dtbo \
 	iqaudio-codec.dtbo \
 	iqaudio-dac.dtbo \
 	iqaudio-dacplus.dtbo \

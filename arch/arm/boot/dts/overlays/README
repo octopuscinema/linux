@@ -703,7 +703,8 @@ Params: swap_lr                 Reverse the channel allocation, which will also
                                 nothing on BCM2711 (default off)
         pins_12_13              Select GPIOs 12 & 13 (default)
         pins_18_19              Select GPIOs 18 & 19
-        pins_40_41              Select GPIOs 40 & 41
+        pins_40_41              Select GPIOs 40 & 41 (not available on CM4, used
+                                for other purposes)
         pins_40_45              Select GPIOs 40 & 45 (don't use on BCM2711 - the
                                 pins are on different controllers)
 
@@ -2557,9 +2558,11 @@ Name:   jedec-spi-nor
 Info:   Adds support for JEDEC-compliant SPI NOR flash devices.  (Note: The
         "jedec,spi-nor" kernel driver was formerly known as "m25p80".)
 Load:   dtoverlay=jedec-spi-nor,<param>=<val>
-Params: flash-spi<n>-<m>        Enables flash device on SPI<n>, CS#<m>.
-        flash-fastr-spi<n>-<m>  Enables flash device with fast read capability
-                                on SPI<n>, CS#<m>.
+Params: spi<n>-<m>              Enable flash device on SPI<n>, CS#<m>
+        fastr                   Add fast read capability to the flash device
+        speed                   Maximum SPI frequency (Hz)
+        flash-spi<n>-<m>        Same as spi<n>-<m> (deprecated)
+        flash-fastr-spi<n>-<m>  Same as spi<n>->m>,fastr (deprecated)
 
 
 Name:   justboom-both
